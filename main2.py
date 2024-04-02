@@ -74,7 +74,7 @@ def get_args_parser():
     parser.add_argument('--amp', action='store_true',
                         help="Train with mixed precision")
     
-    # 3. 添加剪枝相关命令行参数(其中w_sp_mlp改为w_sp_ffn)—----------------------------------------------------------------------------------------------------------
+    # 3. 添加剪枝相关命令行参数—----------------------------------------------------------------------------------------------------------
     # compression parameters
     parser.add_argument('--w_sp_attn', default=6.4e-3, type=float, help='regularization coefficient for attn')
     parser.add_argument('--w_sp_ffn', default=1e-4, type=float, help='regularization coefficient for ffn')
@@ -90,7 +90,7 @@ def get_args_parser():
     
     return parser
 
-# 修改：：：build_model_main函数添加一个search=False参数！！！！！！
+# 修改 build_model_main函数添加一个search=False参数！！！！！！
 def build_model_main(args, search=False):
     # we use register to maintain models from catdet6 on.
     from models.registry import MODULE_BUILD_FUNCS
