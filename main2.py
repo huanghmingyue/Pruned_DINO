@@ -19,11 +19,7 @@ import datasets
 from datasets import build_dataset, get_coco_api_from_dataset
 
 # 1. 把from engine import evaluate, train_one_epoch, test改为以下
-# UPoP_MLP添加了ffn剪枝
-# UPoP_Dselfattn添加了Decoder self attn剪枝
-#UPoP_Dselfattn为学校服务器上的版本
-#UPoP_2为修改后的upop engine（修改了update alpha等问题）
-from UPoP_2 import evaluate, train_one_epoch, compress, print_compression_statistics
+from Upop_2 import evaluate, train_one_epoch, compress, print_compression_statistics
 
 # 2. 添加以下一行：
 from fvcore.nn import FlopCountAnalysis, flop_count_str, flop_count_table
