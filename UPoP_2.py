@@ -50,27 +50,6 @@ def get_sparsity_loss(model):
         sparsity_loss_ffn += torch.sum(torch.abs(getattr(model.module.transformer.decoder.layers, str(i)).ffn.alpha))
         sparsity_loss_d_attn += torch.sum(torch.abs(getattr(model.module.transformer.decoder.layers, str(i)).self_attn.alpha))
     return sparsity_loss_attn, sparsity_loss_ffn, sparsity_loss_d_attn
-#------------------------------------------------------------------------------------------------
-def get_sparsity_loss_1(model):
-    sparsity_loss_attn, sparsity_loss_ffn, sparsity_loss_d_attn= 0, 0, 0
-    for i in range(model.transformer.encoder.num_layers):
-        sparsity_loss_attn += torch.sum(torch.abs(getattr(model.transformer.encoder.layers, str(i)).self_attn.alpha))
-        print(i,"E sparsity_loss_attn:",sparsity_loss_attn,"sparsity_loss_ffn",sparsity_loss_ffn)
-        print("alpha",getattr(model.transformer.encoder.layers, str(i)).self_attn.alpha)
-        print("alpha_ffn",getattr(model.transformer.encoder.layers, str(i)).ffn.alpha)
-        sparsity_loss_ffn += torch.sum(torch.abs(getattr(model.transformer.encoder.layers, str(i)).ffn.alpha))
-    for i in range(model.transformer.decoder.num_layers):
-        sparsity_loss_attn += torch.sum(torch.abs(getattr(model.transformer.decoder.layers, str(i)).cross_attn.alpha))
-        sparsity_loss_ffn += torch.sum(torch.abs(getattr(model.transformer.decoder.layers, str(i)).ffn.alpha))
-        sparsity_loss_d_attn += torch.sum(torch.abs(getattr(model.transformer.decoder.layers, str(i)).self_attn.alpha))
-        print(i,"D sparsity_loss_attn:",sparsity_loss_attn,"sparsity_loss_ffn",sparsity_loss_ffn,"sparsity_loss_d_attn",sparsity_loss_d_attn)
-    
-    print("sparsity_loss_attn:",sparsity_loss_attn,"sparsity_loss_ffn",sparsity_loss_ffn,"sparsity_loss_d_attn")
-    return sparsity_loss_attn, sparsity_loss_ffn, sparsity_loss_d_attn
-
-
-#----------------------------------------------------------------------------------------------------
-
 
 
 
