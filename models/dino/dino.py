@@ -689,7 +689,7 @@ class PostProcess(nn.Module):
 
 
 @MODULE_BUILD_FUNCS.registe_with_name(module_name='dino')
-def build_dino(args):
+def build_dino(args, search=False):
     # the `num_classes` naming here is somewhat misleading.
     # it indeed corresponds to `max_obj_id + 1`, where max_obj_id
     # is the maximum id for a class in your dataset. For example,
@@ -712,7 +712,8 @@ def build_dino(args):
 
     backbone = build_backbone(args)
 
-    transformer = build_deformable_transformer(args)
+    transformer = build_deformable_transformer(args, search=search)
+    
 
     try:
         match_unstable_error = args.match_unstable_error

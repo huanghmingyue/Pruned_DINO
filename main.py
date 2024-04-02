@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 import os, sys
 import numpy as np
+import gc
 
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
@@ -264,6 +265,7 @@ def main(args):
 
         return
 
+    
     print("Start training")
     start_time = time.time()
     best_map_holder = BestMetricHolder(use_ema=args.use_ema)
@@ -274,6 +276,10 @@ def main(args):
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer, device, epoch,
             args.clip_max_norm, wo_class_error=wo_class_error, lr_scheduler=lr_scheduler, args=args, logger=(logger if args.save_log else None), ema_m=ema_m)
+        #-------------------------------------------------------
+        gc.collect()
+        torch.cuda.empty_cache()
+        #-------------------------------------------------------
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
 

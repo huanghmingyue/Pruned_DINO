@@ -28,7 +28,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     except:
         need_tgt_for_training = False
 
-    model.train()
+    model.train() # 将模型设置为训练模式
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -45,7 +45,17 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         with torch.cuda.amp.autocast(enabled=args.amp):
             if need_tgt_for_training:
-                outputs = model(samples, targets)
+                #-----------------------------------------------------------
+                try:
+                    outputs = model(samples, targets)
+                except RuntimeError as exception:
+                    if "out of memory" in str(exception):
+                        print('WARNING: out of memory, will pass this')
+                        torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise exception
+                #---------------------------------------------------------
             else:
                 outputs = model(samples)
         
@@ -86,7 +96,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
             optimizer.step()
-
+            #-------------------------------------------
+            optimizer.zero_grad(set_to_none=True)
+            #-------------------------------------------
         if args.onecyclelr:
             lr_scheduler.step()
         if args.use_ema:

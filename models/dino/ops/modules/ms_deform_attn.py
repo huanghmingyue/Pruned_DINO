@@ -28,7 +28,7 @@ def _is_power_of_2(n):
 
 
 class MSDeformAttn(nn.Module):
-    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4):
+    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4, search=False):
         """
         Multi-Scale Deformable Attention Module
         :param d_model      hidden dimension
@@ -56,6 +56,10 @@ class MSDeformAttn(nn.Module):
         self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
         self.value_proj = nn.Linear(d_model, d_model)
         self.output_proj = nn.Linear(d_model, d_model)
+        # 1.----------------------------------------------------------------------------------------
+        if search:
+            self.alpha = nn.Parameter(torch.ones(1, 1, 1, _d_per_head))
+# ------------------------------------------------------------------------------------------------
 
         self._reset_parameters()
 
@@ -94,7 +98,14 @@ class MSDeformAttn(nn.Module):
         value = self.value_proj(input_flatten)
         if input_padding_mask is not None:
             value = value.masked_fill(input_padding_mask[..., None], float(0))
-        value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)
+        value = value.view(N, Len_in, self.n_heads, -1)#################################改为-1########
+        
+        # ---2. --------------------------------------------------------------------------------------------        
+        if hasattr(self, 'alpha'):
+            value = value * self.alpha
+        # --------------------------------------------------------------------------------------------------
+
+        
         sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)
         attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
         attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)

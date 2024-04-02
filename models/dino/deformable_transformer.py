@@ -21,6 +21,9 @@ from torch import nn, Tensor
 from util.misc import inverse_sigmoid
 from .utils import gen_encoder_output_proposals, MLP,_get_activation_fn, gen_sineembed_for_position
 from .ops.modules import MSDeformAttn
+#---------------------------------------------------------
+from .ops.modules import MultiheadAttention
+#---------------------------------------------------------
 
 class DeformableTransformer(nn.Module):
 
@@ -70,6 +73,7 @@ class DeformableTransformer(nn.Module):
                  embed_init_tgt=False,
 
                  use_detached_boxes_dec_out=False,
+                 search=False
                  ):
         super().__init__()
         self.num_feature_levels = num_feature_levels
@@ -107,7 +111,7 @@ class DeformableTransformer(nn.Module):
         if deformable_encoder:
             encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
                                                           dropout, activation,
-                                                          num_feature_levels, nhead, enc_n_points, add_channel_attention=add_channel_attention, use_deformable_box_attn=use_deformable_box_attn, box_attn_type=box_attn_type)
+                                                          num_feature_levels, nhead, enc_n_points, add_channel_attention=add_channel_attention, use_deformable_box_attn=use_deformable_box_attn, box_attn_type=box_attn_type,search=search)
         else:
             raise NotImplementedError
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
@@ -119,6 +123,7 @@ class DeformableTransformer(nn.Module):
             enc_layer_share=enc_layer_share, 
             two_stage_type=two_stage_type
         )
+        # print("alpha&&&&&&&&&&&&&&&&",getattr(self.encoder.layers, str(0)).self_attn.alpha)
 
         # choose decoder layer type
         if deformable_decoder:
@@ -127,7 +132,7 @@ class DeformableTransformer(nn.Module):
                                                           num_feature_levels, nhead, dec_n_points, use_deformable_box_attn=use_deformable_box_attn, box_attn_type=box_attn_type,
                                                           key_aware_type=key_aware_type,
                                                           decoder_sa_type=decoder_sa_type,
-                                                          module_seq=module_seq)
+                                                          module_seq=module_seq,search=search)
 
         else:
             raise NotImplementedError
@@ -207,7 +212,9 @@ class DeformableTransformer(nn.Module):
             else:
                 assert dec_layer_number[0] == num_queries * num_patterns, f"dec_layer_number[0]({dec_layer_number[0]}) != num_queries({num_queries}) * num_patterns({num_patterns})"
 
+        
         self._reset_parameters()
+        
 
         self.rm_self_attn_layers = rm_self_attn_layers
         if rm_self_attn_layers is not None:
@@ -223,9 +230,15 @@ class DeformableTransformer(nn.Module):
         self.decoder.rm_detach = rm_detach
 
     def _reset_parameters(self):
-        for p in self.parameters():
-            if p.dim() > 1:
+        #print("before alpha&&&&&&&&&&&&&&&&",getattr(self.encoder.layers, str(0)).self_attn.alpha)
+        #print("before alpha&&&&&&&&&&&&&&&&",getattr(self.decoder.layers, str(0)).self_attn.alpha)
+        #print("before alpha&&&&&&&&&&&&&&&&",getattr(self.decoder.layers, str(0)).ffn.alpha)
+        #for p in self.parameters():
+        for name, p in self.named_parameters():
+            if p.dim() > 1 and "alpha" not in name:
+            #if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+        #print("after alpha&&&&&&&&&&&&&&&&",getattr(self.encoder.layers, str(0)).self_attn.alpha)
         for m in self.modules():
             if isinstance(m, MSDeformAttn):
                 m._reset_parameters()
@@ -769,24 +782,30 @@ class DeformableTransformerEncoderLayer(nn.Module):
                  n_levels=4, n_heads=8, n_points=4,
                  add_channel_attention=False,
                  use_deformable_box_attn=False,
-                 box_attn_type='roi_align',
+                 box_attn_type='roi_align',search=False
                  ):
         super().__init__()
         # self attention
         if use_deformable_box_attn:
             self.self_attn = MSDeformableBoxAttention(d_model, n_levels, n_heads, n_boxes=n_points, used_func=box_attn_type)
         else:
-            self.self_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
+            self.self_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points, search=search)
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)
 
         # ffn
-        self.linear1 = nn.Linear(d_model, d_ffn)
-        self.activation = _get_activation_fn(activation, d_model=d_ffn)
-        self.dropout2 = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(d_ffn, d_model)
-        self.dropout3 = nn.Dropout(dropout)
-        self.norm2 = nn.LayerNorm(d_model)
+        # ffn的修改1：--------注释掉self.，封装为FFN类的ffn层，并添加search=search参数
+        #------------------------------------------------------------------------
+        self.ffn = FFN(d_model, d_ffn, activation, dropout, search=search)
+        #-------------------------------------------------------------------------
+        # self.linear1 = nn.Linear(d_model, d_ffn)
+        # self.activation = _get_activation_fn(activation, d_model=d_ffn)
+        # self.dropout2 = nn.Dropout(dropout)
+        # self.linear2 = nn.Linear(d_ffn, d_model)
+        # self.dropout3 = nn.Dropout(dropout)
+        # self.norm2 = nn.LayerNorm(d_model)
+        #---------------------------------------------------------------------------
+
 
         # channel attention
         self.add_channel_attention = add_channel_attention
@@ -797,21 +816,23 @@ class DeformableTransformerEncoderLayer(nn.Module):
     @staticmethod
     def with_pos_embed(tensor, pos):
         return tensor if pos is None else tensor + pos
-
-    def forward_ffn(self, src):
-        src2 = self.linear2(self.dropout2(self.activation(self.linear1(src))))
-        src = src + self.dropout3(src2)
-        src = self.norm2(src)
-        return src
-
+#--------------------------------------------------------------------
+    #def forward_ffn(self, src):
+       # src2 = self.linear2(self.dropout2(self.activation(self.linear1(src))))
+       # src = src + self.dropout3(src2)
+       # src = self.norm2(src)
+       # return src
+#---------------------------------------------------------------------------------
     def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, key_padding_mask=None):
         # self attention
         src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, key_padding_mask)
         src = src + self.dropout1(src2)
         src = self.norm1(src)
 
-        # ffn
-        src = self.forward_ffn(src)
+        # ffn--------------------------
+        # src = self.forward_ffn(src)
+        src = self.ffn(src)
+        #------------------------------
 
         # channel attn
         if self.add_channel_attention:
@@ -828,6 +849,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
                  key_aware_type=None,
                  decoder_sa_type='ca',
                  module_seq=['sa', 'ca', 'ffn'],
+                 search=False
                  ):
         super().__init__()
         self.module_seq = module_seq
@@ -836,22 +858,23 @@ class DeformableTransformerDecoderLayer(nn.Module):
         if use_deformable_box_attn:
             self.cross_attn = MSDeformableBoxAttention(d_model, n_levels, n_heads, n_boxes=n_points, used_func=box_attn_type)
         else:
-            self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
+            self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points,search=search)
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)
 
         # self attention
-        self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
+        self.self_attn = MultiheadAttention(d_model, n_heads, dropout=dropout, search=search)
         self.dropout2 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(d_model)
 
         # ffn
-        self.linear1 = nn.Linear(d_model, d_ffn)
-        self.activation = _get_activation_fn(activation, d_model=d_ffn, batch_dim=1)
-        self.dropout3 = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(d_ffn, d_model)
-        self.dropout4 = nn.Dropout(dropout)
-        self.norm3 = nn.LayerNorm(d_model)
+        self.ffn = FFN_Decoder(d_model, d_ffn, activation, dropout, batch_dim=1, search=search)
+        # self.linear1 = nn.Linear(d_model, d_ffn)
+        # self.activation = _get_activation_fn(activation, d_model=d_ffn, batch_dim=1)
+        # self.dropout3 = nn.Dropout(dropout)
+        # self.linear2 = nn.Linear(d_ffn, d_model)
+        # self.dropout4 = nn.Dropout(dropout)
+        # self.norm3 = nn.LayerNorm(d_model)
 
         self.key_aware_type = key_aware_type
         self.key_aware_proj = None
@@ -870,11 +893,11 @@ class DeformableTransformerDecoderLayer(nn.Module):
     def with_pos_embed(tensor, pos):
         return tensor if pos is None else tensor + pos
 
-    def forward_ffn(self, tgt):
-        tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
-        tgt = tgt + self.dropout4(tgt2)
-        tgt = self.norm3(tgt)
-        return tgt
+    # def forward_ffn(self, tgt):
+        # tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
+        #tgt = tgt + self.dropout4(tgt2)
+        #tgt = self.norm3(tgt)
+        #return tgt
 
     def forward_sa(self,
                 # for tgt
@@ -977,7 +1000,8 @@ class DeformableTransformerDecoderLayer(nn.Module):
 
         for funcname in self.module_seq:
             if funcname == 'ffn':
-                tgt = self.forward_ffn(tgt)
+                # tgt = self.forward_ffn(tgt)
+                tgt = self.ffn(tgt)
             elif funcname == 'ca':
                 tgt = self.forward_ca(tgt, tgt_query_pos, tgt_query_sine_embed, \
                     tgt_key_padding_mask, tgt_reference_points, \
@@ -1001,7 +1025,7 @@ def _get_clones(module, N, layer_share=False):
         return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def build_deformable_transformer(args):
+def build_deformable_transformer(args, search=False):
     decoder_query_perturber = None
     if args.decoder_layer_noise:
         from .utils import RandomBoxPerturber
@@ -1062,7 +1086,71 @@ def build_deformable_transformer(args):
         module_seq=args.decoder_module_seq,
 
         embed_init_tgt=args.embed_init_tgt,
-        use_detached_boxes_dec_out=use_detached_boxes_dec_out
+        use_detached_boxes_dec_out=use_detached_boxes_dec_out,
+        search=search
     )
+
+
+# ffn修改4：为encoder封装FFN类（带有search参数）---------------------------------------------------------------------------------------------
+class FFN(nn.Module):
+    def __init__(self, d_model=256, d_ffn=1024, activation='relu', dropout=0.1, search=False):
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, d_ffn)
+        self.activation = _get_activation_fn(activation, d_model=d_ffn)
+        self.dropout2 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_ffn, d_model)
+        self.dropout3 = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(d_model)
+#################################添加search时的alpha属性###############
+        if search:
+            self.alpha = nn.Parameter(torch.ones(1, 1, d_ffn))
+
+    def forward(self, src):
+        src1 = self.linear1(src)
+##################添加以下#################
+        if hasattr(self, 'alpha'):
+            src1 = src1 * self.alpha
+##########################################
+        src2 = self.activation(src1)
+        src3 = self.dropout2(src2)
+        src4 = self.linear2(src3)
+        src5 = self.dropout3(src4)
+        src6 = src + src5
+        src_out = self.norm2(src6)
+        return src_out
+    
+#----------------------------------------------------------------------------------------------------------------
+
+# ffn修改5：为decoder封装FFN类（带有search参数）---------------------------------------------------------------------------------------------
+class FFN_Decoder(nn.Module):
+    def __init__(self, d_model=256, d_ffn=1024, activation='relu', dropout=0.1,  batch_dim=1, search=False):
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, d_ffn)
+        self.activation = _get_activation_fn(activation, d_model=d_ffn, batch_dim=1)
+        self.dropout3 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_ffn, d_model)
+        self.dropout4 = nn.Dropout(dropout)
+        self.norm3 = nn.LayerNorm(d_model)
+#####################################################################
+        if search:
+            self.alpha = nn.Parameter(torch.ones(1, 1, d_ffn))
+#####################################################################
+    
+    def forward(self, tgt):
+        tgt1 = self.linear1(tgt)
+####################################
+        if hasattr(self, 'alpha'):
+            tgt1 = tgt1 * self.alpha
+####################################
+        tgt2 = self.activation(tgt1)
+        tgt3 = self.dropout3(tgt2)
+        tgt4 = self.linear2(tgt3)
+        tgt5 = self.dropout4(tgt4)
+        tgt6 = tgt + tgt5
+        tgt_out = self.norm3(tgt6)
+        return tgt_out
+
+#----------------------------------------------------------------------------------------------------------------
+
 
 

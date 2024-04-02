@@ -22,11 +22,14 @@ def get_param_dict(args, model_without_ddp: nn.Module):
     # by default
     if param_dict_type == 'default':
         param_dicts = [
-            {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
+            {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and "alpha" not in n and p.requires_grad]},
             {
                 "params": [p for n, p in model_without_ddp.named_parameters() if "backbone" in n and p.requires_grad],
                 "lr": args.lr_backbone,
-            }
+            },
+            # -----------------------添加以下:alpha不参与权重衰减-------------------------------------------------------------------------------------
+            {"params": [p for n, p in model_without_ddp.named_parameters() if "alpha" in n], "weight_decay": 0.0}
+            #---------------------------------------------------------------------------------------------------------------------------------------
         ]
         return param_dicts
 
