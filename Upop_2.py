@@ -264,7 +264,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             metric_logger.update(loss_sp_ffn=args.w_sp_ffn * sparsity_loss_ffn.item()) 
             metric_logger.update(loss_sp_attn=args.w_sp_attn * sparsity_loss_attn.item()) 
             metric_logger.update(loss_sp_dattn=args.w_sp_dattn * sparsity_loss_d_attn.item())
-            losses_reduced_scaled += args.w_sp_attn * sparsity_loss_attn + args.w_sp_ffn * sparsity_loss_ffn + args.w_sp_dattn * sparsity_loss_d_attn
+            losses += args.w_sp_attn * sparsity_loss_attn + args.w_sp_ffn * sparsity_loss_ffn + args.w_sp_dattn * sparsity_loss_d_attn
             step = epoch*len_data_loader+i
         # ---------------------------------------------------------------------------------------
 
